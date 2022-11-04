@@ -114,7 +114,7 @@ function stalkerTraceRangeC(tid, base, size) {
 }
 
 
-function stalkerTraceRange(tid, base, size) {
+function stalkerTraceRange(tid, base, size, slide) {
     Stalker.follow(tid, {
         transform: (iterator) => {
             const instruction = iterator.next();
@@ -129,7 +129,8 @@ function stalkerTraceRange(tid, base, size) {
                         type: 'inst',
                         tid: tid,
                         block: startAddress,
-                        val: JSON.stringify(instruction)
+                        val: JSON.stringify(instruction),
+                        slide: slide
                     })
                     iterator.putCallout((context) => {
                             send({
@@ -145,7 +146,7 @@ function stalkerTraceRange(tid, base, size) {
 }
 
 
-function traceAddr(addr) {
+function traceAddr(addr, slide) {
     let moduleMap = new ModuleMap();    
     let targetModule = moduleMap.find(addr);
     console.log(JSON.stringify(targetModule))
@@ -164,7 +165,7 @@ function traceAddr(addr) {
         onEnter: function(args) {
             this.tid = Process.getCurrentThreadId()
             // stalkerTraceRangeC(this.tid, targetModule.base, targetModule.size)
-            stalkerTraceRange(this.tid, targetModule.base, targetModule.size)
+            stalkerTraceRange(this.tid, targetModule.base, targetModule.size, slide);
         },
         onLeave: function(ret) {
             Stalker.unfollow(this.tid);
@@ -172,7 +173,7 @@ function traceAddr(addr) {
             send({
                 type: "fin",
                 tid: this.tid
-            })
+            });
         }
     })
 }
@@ -227,13 +228,20 @@ function watcherLib(libname, callback) {
         } else {
             // const modules = Process.enumerateModules();
             const targetModule = Process.getModuleByName(libname);
+            const moduleIndex = Process.enumerateModules().map(function(module){return module.path;}).indexOf(targetModule.path);
+
+            var addr = Module.findExportByName("libSystem.B.dylib", "_dyld_get_image_vmaddr_slide");
+            var _dyld_get_image_vmaddr_slide = new NativeFunction(addr, "long", ["uint"]);
+            var slide = _dyld_get_image_vmaddr_slide(moduleIndex);
+            console.log("module " + targetModule.name + " slide: " + slide);
+
             let targetAddress = null;
             if("symbol" in payload) {
                 targetAddress = targetModule.findExportByName(payload.symbol);
             } else if("offset" in payload) {
                 targetAddress = targetModule.base.add(ptr(payload.offset));
             }
-            traceAddr(targetAddress)
+            traceAddr(targetAddress, slide);
         }
     })
 })()
